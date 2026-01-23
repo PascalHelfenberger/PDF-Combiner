@@ -705,13 +705,13 @@ function App() {
       <footer className="glass py-4 shrink-0 mt-auto">
         <div className="container px-4">
           <div className="flex items-center justify-center gap-3">
-            <img src={logoImage} alt="Combine My PDF Logo" className="h-10 w-auto" />
+            <img src={logoImage} alt="Combine Your PDF Logo" className="h-10 w-auto" />
             <div className="flex flex-col">
               <p className="text-sm text-muted-foreground">
-                Combine My PDF - Alle Dateien werden lokal in Ihrem Browser verarbeitet
+                Combine Your PDF - Alle Dateien werden lokal in Ihrem Browser verarbeitet
               </p>
               <p className="text-xs text-muted-foreground">
-                &copy; {new Date().getFullYear()} Combine My PDF. Alle Rechte vorbehalten.
+                &copy; {new Date().getFullYear()} Combine Your PDF. Alle Rechte vorbehalten.
               </p>
             </div>
           </div>
