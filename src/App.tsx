@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import logoImage from './assets/images/combinemypdf.png'
 import { PDFDocument } from 'pdf-lib'
 import * as pdfjsLib from 'pdfjs-dist'
 import {
@@ -704,15 +705,15 @@ function App() {
       <footer className="glass py-4 shrink-0 mt-auto">
         <div className="container px-4">
           <div className="flex items-center justify-center gap-3">
-            <img src="src/assets/images/combinemypdf.png" alt="Combine My PDF Logo" className="h-8 w-auto" />
-            <p className="text-sm text-muted-foreground">
-              Combine My PDF - Alle Dateien werden lokal in Ihrem Browser verarbeitet
-            </p>
-          </div>
-          <div className="text-center mt-2">
-            <p className="text-xs text-muted-foreground">
-              &copy; {new Date().getFullYear()} Combine My PDF. Alle Rechte vorbehalten.
-            </p>
+            <img src={logoImage} alt="Combine My PDF Logo" className="h-10 w-auto" />
+            <div className="flex flex-col">
+              <p className="text-sm text-muted-foreground">
+                Combine My PDF - Alle Dateien werden lokal in Ihrem Browser verarbeitet
+              </p>
+              <p className="text-xs text-muted-foreground">
+                &copy; {new Date().getFullYear()} Combine My PDF. Alle Rechte vorbehalten.
+              </p>
+            </div>
           </div>
         </div>
       </footer>
