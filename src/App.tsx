@@ -349,6 +349,7 @@ function App() {
         await page.render({
           canvasContext: context,
           viewport: viewport,
+          canvas: canvas,
         }).promise
 
         pages.push(canvas.toDataURL('image/jpeg', 0.9))
