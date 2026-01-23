@@ -703,9 +703,17 @@ function App() {
 
       <footer className="glass py-4 shrink-0 mt-auto">
         <div className="container px-4">
-          <p className="text-center text-sm text-muted-foreground">
-            PDF Combiner - Alle Dateien werden lokal in Ihrem Browser verarbeitet
-          </p>
+          <div className="flex items-center justify-center gap-3">
+            <img src="src/assets/images/combinemypdf.png" alt="Combine My PDF Logo" className="h-8 w-auto" />
+            <p className="text-sm text-muted-foreground">
+              Combine My PDF - Alle Dateien werden lokal in Ihrem Browser verarbeitet
+            </p>
+          </div>
+          <div className="text-center mt-2">
+            <p className="text-xs text-muted-foreground">
+              &copy; {new Date().getFullYear()} Combine My PDF. Alle Rechte vorbehalten.
+            </p>
+          </div>
         </div>
       </footer>
     </div>
