@@ -217,6 +217,7 @@ function App() {
       await page.render({
         canvasContext: context,
         viewport: viewport,
+        canvas: canvas,
       }).promise
 
       return canvas.toDataURL('image/jpeg', 0.8)
@@ -345,7 +346,7 @@ function App() {
       }
 
       const mergedPdfBytes = await mergedPdf.save()
-      const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' })
+      const blob = new Blob([new Uint8Array(mergedPdfBytes)], { type: 'application/pdf' })
 
       if (previewData?.url) {
         URL.revokeObjectURL(previewData.url)
