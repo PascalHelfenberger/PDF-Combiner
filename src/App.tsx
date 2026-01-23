@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import logoImage from './assets/images/combinemypdf.png'
+import logoImage from '../public/combinemypdf.png'
 import { PDFDocument } from 'pdf-lib'
 import * as pdfjsLib from 'pdfjs-dist'
 import {
@@ -55,6 +55,7 @@ interface PDFFile {
 interface PreviewData {
   url: string
   pageCount: number
+  pages: string[] // Base64 rendered pages for mobile compatibility
 }
 
 interface SortableItemProps {
@@ -327,6 +328,37 @@ function App() {
     setPdfFiles([])
   }
 
+  const renderPdfPages = async (pdfBytes: Uint8Array): Promise<string[]> => {
+    const pages: string[] = []
+    try {
+      const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise
+      const totalPages = pdf.numPages
+
+      for (let i = 1; i <= totalPages; i++) {
+        const page = await pdf.getPage(i)
+        const scale = 1.5 // Höhere Auflösung für bessere Lesbarkeit
+        const viewport = page.getViewport({ scale })
+
+        const canvas = document.createElement('canvas')
+        const context = canvas.getContext('2d')
+        if (!context) continue
+
+        canvas.width = viewport.width
+        canvas.height = viewport.height
+
+        await page.render({
+          canvasContext: context,
+          viewport: viewport,
+        }).promise
+
+        pages.push(canvas.toDataURL('image/jpeg', 0.9))
+      }
+    } catch (error) {
+      console.error('Fehler beim Rendern der Seiten:', error)
+    }
+    return pages
+  }
+
   const combinePDFs = async () => {
     const selectedFiles = pdfFiles.filter((f) => f.selected)
     if (selectedFiles.length < 2) {
@@ -354,9 +386,14 @@ function App() {
       }
 
       const url = URL.createObjectURL(blob)
+
+      // Render pages for mobile-compatible preview
+      const renderedPages = await renderPdfPages(new Uint8Array(mergedPdfBytes))
+
       setPreviewData({
         url,
         pageCount: mergedPdf.getPageCount(),
+        pages: renderedPages,
       })
       setShowPreview(true)
     } catch (error) {
@@ -436,14 +473,40 @@ function App() {
           </div>
         </header>
 
-        <main className="flex-1 container px-4 py-4 animate-fade-in">
-          <Card className="h-full glass-card">
-            <CardContent className="p-0 h-full">
+        <main className="flex-1 container px-4 py-4 animate-fade-in overflow-hidden">
+          <Card className="h-full glass-card flex flex-col">
+            <CardContent className="p-2 sm:p-4 flex-1 overflow-hidden">
+              {/* Desktop: iframe (hidden on mobile) */}
               <iframe
                 src={previewData.url}
-                className="w-full h-[calc(100vh-200px)] sm:h-[calc(100vh-180px)] rounded-xl"
+                className="w-full h-[calc(100vh-220px)] sm:h-[calc(100vh-200px)] rounded-xl hidden sm:block"
                 title="PDF Vorschau"
               />
+              {/* Mobile: gerenderte Bilder (hidden on desktop) */}
+              <div className="h-[calc(100vh-220px)] overflow-y-auto space-y-4 pr-2 sm:hidden">
+                {previewData.pages.length > 0 ? (
+                  previewData.pages.map((pageData, index) => (
+                    <div key={index} className="relative">
+                      <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded-md z-10">
+                        Seite {index + 1} / {previewData.pageCount}
+                      </div>
+                      <img
+                        src={pageData}
+                        alt={`Seite ${index + 1}`}
+                        className="w-full rounded-lg shadow-lg border border-border/50"
+                      />
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                    <FileText className="h-16 w-16 text-muted-foreground mb-4" />
+                    <p className="text-lg font-medium">PDF bereit zum Download</p>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      {previewData.pageCount} Seiten zusammengefügt
+                    </p>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </main>
