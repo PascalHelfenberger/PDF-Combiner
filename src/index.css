@@ -1,0 +1,227 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.75rem;
+    --success: 142 76% 36%;
+    --success-foreground: 210 40% 98%;
+  }
+
+  .dark {
+    --background: 222.2 47% 8%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 47% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 47% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+    --success: 142 76% 46%;
+    --success-foreground: 222.2 47.4% 11.2%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+/* Glassmorphism */
+@layer components {
+  .glass {
+    @apply bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl border border-white/20 dark:border-white/10;
+  }
+
+  .glass-card {
+    @apply bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl border border-white/30 dark:border-white/10 shadow-xl;
+  }
+
+  .glass-header {
+    @apply bg-gradient-to-r from-blue-600/90 to-indigo-600/90 dark:from-blue-500/80 dark:to-indigo-500/80 backdrop-blur-xl;
+  }
+}
+
+/* Animationen */
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.3s ease-out;
+  }
+
+  .animate-bounce-in {
+    animation: bounceIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .hover-lift {
+    @apply transition-all duration-300 ease-out;
+  }
+
+  .hover-lift:hover {
+    @apply -translate-y-1 shadow-lg;
+  }
+
+  .hover-glow:hover {
+    @apply shadow-lg shadow-primary/25;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Background Pattern */
+.bg-pattern {
+  background-image:
+    radial-gradient(at 40% 20%, hsla(228, 85%, 70%, 0.15) 0px, transparent 50%),
+    radial-gradient(at 80% 0%, hsla(189, 100%, 56%, 0.1) 0px, transparent 50%),
+    radial-gradient(at 0% 50%, hsla(355, 85%, 73%, 0.1) 0px, transparent 50%),
+    radial-gradient(at 80% 50%, hsla(240, 85%, 70%, 0.1) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, hsla(22, 85%, 70%, 0.1) 0px, transparent 50%);
+}
+
+.dark .bg-pattern {
+  background-image:
+    radial-gradient(at 40% 20%, hsla(228, 85%, 40%, 0.2) 0px, transparent 50%),
+    radial-gradient(at 80% 0%, hsla(189, 100%, 36%, 0.15) 0px, transparent 50%),
+    radial-gradient(at 0% 50%, hsla(355, 85%, 43%, 0.1) 0px, transparent 50%),
+    radial-gradient(at 80% 50%, hsla(240, 85%, 40%, 0.15) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, hsla(22, 85%, 40%, 0.1) 0px, transparent 50%);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-muted-foreground/20 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-muted-foreground/40;
+}
+
+/* PDF Thumbnail */
+.pdf-thumbnail {
+  @apply rounded-lg overflow-hidden shadow-md transition-transform duration-300;
+}
+
+.pdf-thumbnail:hover {
+  @apply scale-105;
+}
+
+/* Drag and Drop */
+.drop-zone-active {
+  @apply border-primary bg-primary/10 scale-[1.02];
+  animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Dark Mode Toggle Animation */
+.theme-toggle {
+  @apply relative overflow-hidden;
+}
+
+.theme-toggle::before {
+  content: '';
+  @apply absolute inset-0 bg-gradient-to-r from-yellow-400 to-orange-500 dark:from-blue-600 dark:to-purple-600 opacity-0 transition-opacity duration-300;
+}
+
+.theme-toggle:hover::before {
+  @apply opacity-20;
+}
