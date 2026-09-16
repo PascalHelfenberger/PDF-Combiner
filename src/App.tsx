@@ -45,6 +45,7 @@ import {
   RectangleHorizontal,
   RectangleVertical,
   ScanText,
+  Image as ImageIcon,
 } from 'lucide-react'
 
 // PDF.js Worker lokal/inline bündeln -> funktioniert offline und über file://
@@ -64,6 +65,12 @@ const PAGE_FORMATS: Record<string, { label: string; width: number; height: numbe
 }
 type FormatKey = keyof typeof PAGE_FORMATS
 type Orientation = 'portrait' | 'landscape'
+
+// Seitengröße für importierte Bilder: festes Format oder Originalgröße des Bildes
+type ImagePageSize = FormatKey | 'original'
+
+// Bildschirm-Pixel -> PDF-Punkte (Annahme: 96 dpi)
+const PX_TO_PT = 72 / 96
 
 // Tesseract.js dynamisch vom CDN laden (OCR läuft lokal im Browser)
 const TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
@@ -141,6 +148,61 @@ function loadImageEl(src: string): Promise<HTMLImageElement> {
   })
 }
 
+
+// Bilddatei (JPG/PNG/WebP/…) in ein einseitiges PDF umwandeln.
+// Dadurch läuft das Bild anschließend durch die gleiche Verarbeitung wie eine
+// normale PDF-Seite: Vorschau, Sortieren, Editor und OCR funktionieren unverändert.
+async function imageFileToPdfBytes(file: File, pageSize: ImagePageSize): Promise<Uint8Array> {
+  const doc = await PDFDocument.create()
+
+  let image
+  if (file.type === 'image/jpeg') {
+    image = await doc.embedJpg(await file.arrayBuffer())
+  } else if (file.type === 'image/png') {
+    image = await doc.embedPng(await file.arrayBuffer())
+  } else {
+    // WebP, GIF, BMP … : über ein Canvas nach PNG konvertieren
+    const url = URL.createObjectURL(file)
+    try {
+      const img = await loadImageEl(url)
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('Canvas-Kontext fehlt')
+      ctx.drawImage(img, 0, 0)
+      image = await doc.embedPng(canvas.toDataURL('image/png'))
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
+
+  if (pageSize === 'original') {
+    // Seite exakt so groß wie das Bild (96 dpi angenommen)
+    const width = image.width * PX_TO_PT
+    const height = image.height * PX_TO_PT
+    const page = doc.addPage([width, height])
+    page.drawImage(image, { x: 0, y: 0, width, height })
+  } else {
+    // In das gewählte Format einpassen, Ausrichtung folgt dem Seitenverhältnis
+    const fmt = PAGE_FORMATS[pageSize]
+    const isLandscape = image.width > image.height
+    const pageWidth = isLandscape ? fmt.height : fmt.width
+    const pageHeight = isLandscape ? fmt.width : fmt.height
+    const scale = Math.min(pageWidth / image.width, pageHeight / image.height)
+    const width = image.width * scale
+    const height = image.height * scale
+    const page = doc.addPage([pageWidth, pageHeight])
+    page.drawImage(image, {
+      x: (pageWidth - width) / 2,
+      y: (pageHeight - height) / 2,
+      width,
+      height,
+    })
+  }
+
+  return doc.save()
+}
 
 // Ein Eintrag in der Liste ist entweder eine echte PDF-Seite oder eine Leerseite
 interface PageItem {
@@ -316,6 +378,7 @@ function App() {
   const [outputName, setOutputName] = useState('combined')
   const [blankFormat, setBlankFormat] = useState<FormatKey>('A4')
   const [blankOrientation, setBlankOrientation] = useState<Orientation>('portrait')
+  const [imagePageSize, setImagePageSize] = useState<ImagePageSize>('A4')
   const [ocrEnabled, setOcrEnabled] = useState(false)
   const [ocrLanguages, setOcrLanguages] = useState<string[]>(['deu', 'eng'])
   const [ocrStatus, setOcrStatus] = useState<string | null>(null)
@@ -361,11 +424,10 @@ function App() {
   const makeId = () =>
     `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
-  // Eine PDF-Datei in einzelne Seiten-Einträge zerlegen.
+  // PDF-Bytes in einzelne Seiten-Einträge zerlegen.
   // Seitenanzahl wird über pdf-lib ermittelt (kein Worker nötig) -> immer robust.
-  const explodeFile = async (file: File): Promise<PageItem[]> => {
+  const explodeBytes = async (bytes: Uint8Array, name: string): Promise<PageItem[]> => {
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer())
       const sourceId = makeId()
       // Bytes für späteres Kopieren der Seiten / Thumbnails merken
       sourcesRef.current.set(sourceId, bytes)
@@ -381,7 +443,7 @@ function App() {
           type: 'pdf',
           sourceId,
           pageIndex: i,
-          sourceName: file.name,
+          sourceName: name,
           selected: true,
           thumbnail: null,
         })
@@ -429,13 +491,22 @@ function App() {
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const fileArray = Array.from(files).filter(
-      (file) => file.type === 'application/pdf'
+      (file) => file.type === 'application/pdf' || file.type.startsWith('image/')
     )
 
     const newItems: PageItem[] = []
     const newSourceIds: string[] = []
     for (const file of fileArray) {
-      const items = await explodeFile(file)
+      let bytes: Uint8Array
+      try {
+        bytes = file.type.startsWith('image/')
+          ? await imageFileToPdfBytes(file, imagePageSize)
+          : new Uint8Array(await file.arrayBuffer())
+      } catch (error) {
+        console.error(`Datei konnte nicht gelesen werden: ${file.name}`, error)
+        continue
+      }
+      const items = await explodeBytes(bytes, file.name)
       if (items.length > 0 && items[0].sourceId) {
         newSourceIds.push(items[0].sourceId)
       }
@@ -448,7 +519,7 @@ function App() {
         void renderThumbnailsForSource(sid)
       })
     }
-  }, [])
+  }, [imagePageSize])
 
   const makeBlankItem = (): PageItem => {
     const fmt = PAGE_FORMATS[blankFormat]
@@ -960,10 +1031,10 @@ function App() {
                 <div className="p-2 bg-primary/10 rounded-lg">
                   <FileUp className="h-5 w-5 text-primary" />
                 </div>
-                PDF-Dateien hochladen
+                PDFs & Bilder hochladen
               </CardTitle>
               <CardDescription>
-                Ziehen Sie PDF-Dateien hierher oder klicken Sie zum Auswählen
+                Ziehen Sie PDF- oder Bilddateien hierher oder klicken Sie zum Auswählen
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -987,20 +1058,44 @@ function App() {
                   <p className="text-lg font-medium">
                     {isDragOver
                       ? 'Dateien hier ablegen'
-                      : 'PDF-Dateien hierher ziehen'}
+                      : 'PDF- oder Bilddateien hierher ziehen'}
                   </p>
                   <p className="text-sm text-muted-foreground mt-2">
-                    oder klicken zum Auswählen
+                    oder klicken zum Auswählen · JPG, PNG, WebP werden zu PDF-Seiten
                   </p>
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,application/pdf"
+                  accept=".pdf,application/pdf,image/*"
                   multiple
                   onChange={handleFileInput}
                   className="hidden"
                 />
+              </div>
+
+              {/* Seitenformat für importierte Bilder */}
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-2">
+                <Label htmlFor="imagePageSize" className="text-xs flex items-center gap-1.5">
+                  <ImageIcon className="h-4 w-4 text-primary" />
+                  Bilder einfügen als
+                </Label>
+                <select
+                  id="imagePageSize"
+                  value={imagePageSize}
+                  onChange={(e) => setImagePageSize(e.target.value as ImagePageSize)}
+                  className="h-9 w-full sm:w-56 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {Object.keys(PAGE_FORMATS).map((key) => (
+                    <option key={key} value={key}>
+                      {PAGE_FORMATS[key].label}-Seite (eingepasst)
+                    </option>
+                  ))}
+                  <option value="original">Originalgröße des Bildes</option>
+                </select>
+                <p className="text-xs text-muted-foreground sm:ml-2">
+                  Gilt für Bilder, die danach hinzugefügt werden.
+                </p>
               </div>
 
               {pageItems.length > 0 && (
@@ -1205,7 +1300,7 @@ function App() {
                         <p className="text-xs text-destructive">Bitte mindestens eine Sprache wählen.</p>
                       )}
                       <p className="text-xs text-muted-foreground">
-                        OCR läuft lokal im Browser. Beim ersten Mal werden Sprachdaten aus dem Internet geladen; die Verarbeitung kann je nach Seitenzahl etwas dauern.
+                        OCR läuft lokal im Browser und erkennt auch Text auf eingefügten Bildern. Beim ersten Mal werden Sprachdaten aus dem Internet geladen; die Verarbeitung kann je nach Seitenzahl etwas dauern.
                       </p>
                     </div>
                   )}
@@ -1255,9 +1350,9 @@ function App() {
                   <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-muted/50 flex items-center justify-center">
                     <FileText className="h-10 w-10 opacity-50" />
                   </div>
-                  <p className="text-lg font-medium">Keine PDFs hochgeladen</p>
+                  <p className="text-lg font-medium">Keine Dateien hochgeladen</p>
                   <p className="text-sm mt-2">
-                    Laden Sie PDF-Dateien hoch, um diese zusammenzufügen
+                    Laden Sie PDFs oder Bilder hoch, um diese zusammenzufügen
                   </p>
                 </div>
               </CardContent>
