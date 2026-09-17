@@ -46,6 +46,7 @@ import {
   RectangleVertical,
   ScanText,
   Image as ImageIcon,
+  Scaling,
 } from 'lucide-react'
 
 // PDF.js Worker lokal/inline bündeln -> funktioniert offline und über file://
@@ -68,6 +69,8 @@ type Orientation = 'portrait' | 'landscape'
 
 // Seitengröße für importierte Bilder: festes Format oder Originalgröße des Bildes
 type ImagePageSize = FormatKey | 'original'
+// Ausrichtung der Bildseite: automatisch nach Seitenverhältnis oder fest gewählt
+type ImageOrientation = Orientation | 'auto'
 
 // Bildschirm-Pixel -> PDF-Punkte (Annahme: 96 dpi)
 const PX_TO_PT = 72 / 96
@@ -148,33 +151,115 @@ function loadImageEl(src: string): Promise<HTMLImageElement> {
   })
 }
 
+// EXIF-Orientierung eines JPEGs lesen (1 = aufrecht, 2-8 = gedreht/gespiegelt).
+// Handykameras speichern das Bild oft quer und vermerken die Drehung nur hier;
+// pdf-lib wertet das nicht aus, deshalb müssen wir es selbst erkennen.
+function readJpegOrientation(buffer: ArrayBuffer): number {
+  try {
+    const view = new DataView(buffer)
+    if (view.byteLength < 4 || view.getUint16(0) !== 0xffd8) return 1 // kein JPEG
+    let offset = 2
+    while (offset + 4 <= view.byteLength) {
+      const marker = view.getUint16(offset)
+      if ((marker & 0xff00) !== 0xff00) break
+      if (marker === 0xffda) break // Beginn der Bilddaten, kein EXIF mehr
+      const segmentLength = view.getUint16(offset + 2)
+      if (marker === 0xffe1) {
+        const exifStart = offset + 4
+        // "Exif" + 2 Nullbytes, danach beginnt der TIFF-Header
+        if (exifStart + 14 > view.byteLength) return 1
+        if (view.getUint32(exifStart) !== 0x45786966) return 1
+        const tiff = exifStart + 6
+        const littleEndian = view.getUint16(tiff) === 0x4949
+        const ifdOffset = view.getUint32(tiff + 4, littleEndian)
+        const entryCount = view.getUint16(tiff + ifdOffset, littleEndian)
+        for (let i = 0; i < entryCount; i++) {
+          const entry = tiff + ifdOffset + 2 + i * 12
+          if (entry + 12 > view.byteLength) break
+          if (view.getUint16(entry, littleEndian) === 0x0112) {
+            return view.getUint16(entry + 8, littleEndian) || 1
+          }
+        }
+        return 1
+      }
+      offset += 2 + segmentLength
+    }
+  } catch {
+    // Defektes EXIF soll den Import nicht verhindern
+  }
+  return 1
+}
+
+// Bild dekodieren und als dataURL zurückgeben. createImageBitmap wendet mit
+// imageOrientation: 'from-image' die EXIF-Drehung an, sodass die Pixel bereits
+// richtig herum liegen. Fotos werden als JPEG, Grafiken als PNG ausgegeben.
+async function normalizeImage(file: File): Promise<{ dataUrl: string }> {
+  const asPng = file.type === 'image/gif' || file.type === 'image/bmp'
+  let width: number
+  let height: number
+  let source: CanvasImageSource
+
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+    width = bitmap.width
+    height = bitmap.height
+    source = bitmap
+  } else {
+    // Sehr alte Browser: Fallback ohne EXIF-Auswertung
+    const url = URL.createObjectURL(file)
+    try {
+      const img = await loadImageEl(url)
+      width = img.naturalWidth
+      height = img.naturalHeight
+      source = img
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas-Kontext fehlt')
+  if (!asPng) {
+    // JPEG kennt keine Transparenz -> sonst würde sie schwarz werden
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, width, height)
+  }
+  ctx.drawImage(source, 0, 0)
+  if ('close' in source && typeof source.close === 'function') source.close()
+
+  return { dataUrl: canvas.toDataURL(asPng ? 'image/png' : 'image/jpeg', 0.92) }
+}
+
 
 // Bilddatei (JPG/PNG/WebP/…) in ein einseitiges PDF umwandeln.
 // Dadurch läuft das Bild anschließend durch die gleiche Verarbeitung wie eine
 // normale PDF-Seite: Vorschau, Sortieren, Editor und OCR funktionieren unverändert.
-async function imageFileToPdfBytes(file: File, pageSize: ImagePageSize): Promise<Uint8Array> {
+async function imageFileToPdfBytes(
+  file: File,
+  pageSize: ImagePageSize,
+  orientation: ImageOrientation
+): Promise<Uint8Array> {
   const doc = await PDFDocument.create()
+  const buffer = await file.arrayBuffer()
 
   let image
-  if (file.type === 'image/jpeg') {
-    image = await doc.embedJpg(await file.arrayBuffer())
+  if (file.type === 'image/jpeg' && readJpegOrientation(buffer) === 1) {
+    // Aufrecht aufgenommenes JPEG: unverändert einbetten (verlustfrei, klein)
+    image = await doc.embedJpg(buffer)
   } else if (file.type === 'image/png') {
-    image = await doc.embedPng(await file.arrayBuffer())
+    // PNG kennt keine EXIF-Drehung
+    image = await doc.embedPng(buffer)
   } else {
-    // WebP, GIF, BMP … : über ein Canvas nach PNG konvertieren
-    const url = URL.createObjectURL(file)
-    try {
-      const img = await loadImageEl(url)
-      const canvas = document.createElement('canvas')
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
-      const ctx = canvas.getContext('2d')
-      if (!ctx) throw new Error('Canvas-Kontext fehlt')
-      ctx.drawImage(img, 0, 0)
-      image = await doc.embedPng(canvas.toDataURL('image/png'))
-    } finally {
-      URL.revokeObjectURL(url)
-    }
+    // Gedrehte Handyfotos sowie WebP/GIF/BMP über ein Canvas normalisieren.
+    // createImageBitmap wendet dabei die EXIF-Drehung an, sodass das Bild
+    // so im PDF landet, wie es auf dem Handy angezeigt wird.
+    const { dataUrl } = await normalizeImage(file)
+    image = dataUrl.startsWith('data:image/png')
+      ? await doc.embedPng(dataUrl)
+      : await doc.embedJpg(dataUrl)
   }
 
   if (pageSize === 'original') {
@@ -184,9 +269,11 @@ async function imageFileToPdfBytes(file: File, pageSize: ImagePageSize): Promise
     const page = doc.addPage([width, height])
     page.drawImage(image, { x: 0, y: 0, width, height })
   } else {
-    // In das gewählte Format einpassen, Ausrichtung folgt dem Seitenverhältnis
+    // In das gewählte Format einpassen. Die Ausrichtung folgt der Auswahl;
+    // bei "auto" entscheidet das Seitenverhältnis des Bildes.
     const fmt = PAGE_FORMATS[pageSize]
-    const isLandscape = image.width > image.height
+    const isLandscape =
+      orientation === 'auto' ? image.width > image.height : orientation === 'landscape'
     const pageWidth = isLandscape ? fmt.height : fmt.width
     const pageHeight = isLandscape ? fmt.width : fmt.height
     const scale = Math.min(pageWidth / image.width, pageHeight / image.height)
@@ -233,11 +320,13 @@ interface SortableItemProps {
   onRemove: (id: string) => void
   onAddBlankAfter: (id: string) => void
   onOpenEditor: (id: string) => void
+  onRefit: (id: string) => void
+  isImage: boolean
   index: number
   displayNumber: number
 }
 
-function SortableItem({ pageItem, onToggle, onRemove, onAddBlankAfter, onOpenEditor, index, displayNumber }: SortableItemProps) {
+function SortableItem({ pageItem, onToggle, onRemove, onAddBlankAfter, onOpenEditor, onRefit, isImage, index, displayNumber }: SortableItemProps) {
   const {
     attributes,
     listeners,
@@ -330,9 +419,23 @@ function SortableItem({ pageItem, onToggle, onRemove, onAddBlankAfter, onOpenEdi
         <p className="text-[11px] text-muted-foreground truncate">
           {isBlank
             ? pageItem.blankLabel ?? 'A4'
-            : `Seite ${(pageItem.pageIndex ?? 0) + 1}`}
+            : isImage
+              ? 'Bild'
+              : `Seite ${(pageItem.pageIndex ?? 0) + 1}`}
           {pageItem.editedDataUrl ? ' · bearbeitet' : ''}
         </p>
+        {isImage && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onRefit(pageItem.id)}
+            title="Format und Ausrichtung dieser Bildseite ändern"
+            className="w-full mt-1 h-7 text-xs text-primary hover:bg-primary/10"
+          >
+            <Scaling className="h-3.5 w-3.5 mr-1" />
+            Einpassung ändern
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"
@@ -375,10 +478,21 @@ function App() {
   const [pageItems, setPageItems] = useState<PageItem[]>([])
   // Roh-Bytes der Quelldateien, um beim Zusammenfügen Seiten kopieren zu können
   const sourcesRef = useRef<Map<string, Uint8Array>>(new Map())
+  // Originalbilder behalten, damit Format und Ausrichtung später erneut
+  // angewendet werden können, ohne dass Qualität verloren geht
+  const imageSourcesRef = useRef<
+    Map<string, { file: File; pageSize: ImagePageSize; orientation: ImageOrientation }>
+  >(new Map())
   const [outputName, setOutputName] = useState('combined')
   const [blankFormat, setBlankFormat] = useState<FormatKey>('A4')
   const [blankOrientation, setBlankOrientation] = useState<Orientation>('portrait')
   const [imagePageSize, setImagePageSize] = useState<ImagePageSize>('A4')
+  const [imageOrientation, setImageOrientation] = useState<ImageOrientation>('auto')
+  // Nachträgliches Anpassen der Einpassung eines Bildes
+  const [refitId, setRefitId] = useState<string | null>(null)
+  const [refitSize, setRefitSize] = useState<ImagePageSize>('A4')
+  const [refitOrientation, setRefitOrientation] = useState<ImageOrientation>('auto')
+  const [isRefitting, setIsRefitting] = useState(false)
   const [ocrEnabled, setOcrEnabled] = useState(false)
   const [ocrLanguages, setOcrLanguages] = useState<string[]>(['deu', 'eng'])
   const [ocrStatus, setOcrStatus] = useState<string | null>(null)
@@ -496,19 +610,33 @@ function App() {
 
     const newItems: PageItem[] = []
     const newSourceIds: string[] = []
+    const failed: string[] = []
     for (const file of fileArray) {
+      const isImage = file.type.startsWith('image/')
       let bytes: Uint8Array
       try {
-        bytes = file.type.startsWith('image/')
-          ? await imageFileToPdfBytes(file, imagePageSize)
+        bytes = isImage
+          ? await imageFileToPdfBytes(file, imagePageSize, imageOrientation)
           : new Uint8Array(await file.arrayBuffer())
       } catch (error) {
         console.error(`Datei konnte nicht gelesen werden: ${file.name}`, error)
+        failed.push(file.name)
         continue
       }
       const items = await explodeBytes(bytes, file.name)
-      if (items.length > 0 && items[0].sourceId) {
+      if (items.length === 0) {
+        failed.push(file.name)
+        continue
+      }
+      if (items[0].sourceId) {
         newSourceIds.push(items[0].sourceId)
+        if (isImage) {
+          imageSourcesRef.current.set(items[0].sourceId, {
+            file,
+            pageSize: imagePageSize,
+            orientation: imageOrientation,
+          })
+        }
       }
       newItems.push(...items)
     }
@@ -519,7 +647,15 @@ function App() {
         void renderThumbnailsForSource(sid)
       })
     }
-  }, [imagePageSize])
+
+    if (failed.length > 0) {
+      alert(
+        `Diese Dateien konnten nicht geladen werden:\n\n${failed.join('\n')}\n\n` +
+          'Mögliche Ursachen: beschädigte oder passwortgeschützte PDFs, oder ein ' +
+          'Bildformat, das der Browser nicht öffnen kann (z. B. HEIC von iPhones).'
+      )
+    }
+  }, [imagePageSize, imageOrientation])
 
   const makeBlankItem = (): PageItem => {
     const fmt = PAGE_FORMATS[blankFormat]
@@ -605,7 +741,76 @@ function App() {
   }
 
   const removeFile = (id: string) => {
-    setPageItems((items) => items.filter((f) => f.id !== id))
+    setPageItems((items) => {
+      const removed = items.find((f) => f.id === id)
+      const rest = items.filter((f) => f.id !== id)
+      // Quelldaten freigeben, sobald keine Seite mehr darauf verweist
+      const sourceId = removed?.sourceId
+      if (sourceId && !rest.some((f) => f.sourceId === sourceId)) {
+        sourcesRef.current.delete(sourceId)
+        imageSourcesRef.current.delete(sourceId)
+      }
+      return rest
+    })
+  }
+
+  // Format/Ausrichtung eines bereits eingefügten Bildes erneut anwenden.
+  // Die Seite wird aus dem Originalbild neu aufgebaut, daher entsteht kein
+  // Qualitätsverlust durch mehrfaches Anpassen.
+  const applyRefit = async () => {
+    const item = pageItems.find((pi) => pi.id === refitId)
+    const source = item?.sourceId ? imageSourcesRef.current.get(item.sourceId) : undefined
+    if (!item || !item.sourceId || !source) return
+
+    if (
+      item.editedDataUrl &&
+      !window.confirm(
+        'Diese Seite wurde im Editor bearbeitet. Beim Anpassen der Einpassung gehen ' +
+          'diese Änderungen verloren. Fortfahren?'
+      )
+    ) {
+      return
+    }
+
+    setIsRefitting(true)
+    try {
+      const bytes = await imageFileToPdfBytes(source.file, refitSize, refitOrientation)
+      sourcesRef.current.set(item.sourceId, bytes)
+      imageSourcesRef.current.set(item.sourceId, {
+        ...source,
+        pageSize: refitSize,
+        orientation: refitOrientation,
+      })
+      setPageItems((items) =>
+        items.map((it) =>
+          it.sourceId === item.sourceId
+            ? {
+                ...it,
+                thumbnail: null,
+                editedDataUrl: undefined,
+                editedWidthPt: undefined,
+                editedHeightPt: undefined,
+              }
+            : it
+        )
+      )
+      await renderThumbnailsForSource(item.sourceId)
+      setRefitId(null)
+    } catch (error) {
+      console.error('Einpassung konnte nicht geändert werden:', error)
+      alert('Die Einpassung konnte nicht geändert werden.')
+    } finally {
+      setIsRefitting(false)
+    }
+  }
+
+  const openRefit = (id: string) => {
+    const item = pageItems.find((pi) => pi.id === id)
+    const source = item?.sourceId ? imageSourcesRef.current.get(item.sourceId) : undefined
+    if (!source) return
+    setRefitSize(source.pageSize)
+    setRefitOrientation(source.orientation)
+    setRefitId(id)
   }
 
   const selectAll = () => {
@@ -619,6 +824,7 @@ function App() {
   const removeAll = () => {
     setPageItems([])
     sourcesRef.current.clear()
+    imageSourcesRef.current.clear()
   }
 
   const toggleOcrLanguage = (code: string) => {
@@ -1074,27 +1280,70 @@ function App() {
                 />
               </div>
 
-              {/* Seitenformat für importierte Bilder */}
-              <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-2">
-                <Label htmlFor="imagePageSize" className="text-xs flex items-center gap-1.5">
-                  <ImageIcon className="h-4 w-4 text-primary" />
-                  Bilder einfügen als
-                </Label>
-                <select
-                  id="imagePageSize"
-                  value={imagePageSize}
-                  onChange={(e) => setImagePageSize(e.target.value as ImagePageSize)}
-                  className="h-9 w-full sm:w-56 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {Object.keys(PAGE_FORMATS).map((key) => (
-                    <option key={key} value={key}>
-                      {PAGE_FORMATS[key].label}-Seite (eingepasst)
-                    </option>
-                  ))}
-                  <option value="original">Originalgröße des Bildes</option>
-                </select>
-                <p className="text-xs text-muted-foreground sm:ml-2">
-                  Gilt für Bilder, die danach hinzugefügt werden.
+              {/* Seitenformat & Ausrichtung für importierte Bilder */}
+              <div className="mt-4 rounded-xl border border-border/50 bg-muted/20 p-3 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="imagePageSize" className="text-xs flex items-center gap-1.5">
+                      <ImageIcon className="h-4 w-4 text-primary" />
+                      Bilder einfügen als
+                    </Label>
+                    <select
+                      id="imagePageSize"
+                      value={imagePageSize}
+                      onChange={(e) => setImagePageSize(e.target.value as ImagePageSize)}
+                      className="h-9 w-full sm:w-52 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      {Object.keys(PAGE_FORMATS).map((key) => (
+                        <option key={key} value={key}>
+                          {PAGE_FORMATS[key].label}-Seite (eingepasst)
+                        </option>
+                      ))}
+                      <option value="original">Originalgröße des Bildes</option>
+                    </select>
+                  </div>
+
+                  {imagePageSize !== 'original' && (
+                    <div className="space-y-1">
+                      <Label className="text-xs">Ausrichtung der Bildseite</Label>
+                      <div className="flex gap-1">
+                        <Button
+                          type="button"
+                          variant={imageOrientation === 'auto' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setImageOrientation('auto')}
+                          title="Ausrichtung nach Seitenverhältnis des Bildes"
+                        >
+                          Automatisch
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={imageOrientation === 'portrait' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setImageOrientation('portrait')}
+                          className="gap-1.5"
+                        >
+                          <RectangleVertical className="h-4 w-4" />
+                          Hochformat
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={imageOrientation === 'landscape' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setImageOrientation('landscape')}
+                          className="gap-1.5"
+                        >
+                          <RectangleHorizontal className="h-4 w-4" />
+                          Querformat
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Das Bild wird vollständig in die Seite eingepasst und zentriert – auch wenn ein
+                  breites Bild im Hochformat landet. Die Einstellung gilt für Bilder, die danach
+                  hinzugefügt werden.
                 </p>
               </div>
 
@@ -1226,6 +1475,10 @@ function App() {
                           onRemove={removeFile}
                           onAddBlankAfter={addBlankAfter}
                           onOpenEditor={openEditor}
+                          onRefit={openRefit}
+                          isImage={
+                            !!pageItem.sourceId && imageSourcesRef.current.has(pageItem.sourceId)
+                          }
                           index={index}
                           displayNumber={displayNumbers[index]}
                         />
@@ -1376,6 +1629,91 @@ function App() {
           </div>
         </div>
       </footer>
+
+      {/* Dialog: Einpassung einer Bildseite nachträglich ändern */}
+      {refitId && (
+        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <Card className="glass-card w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <Scaling className="h-5 w-5 text-primary" />
+                </div>
+                Einpassung ändern
+              </CardTitle>
+              <CardDescription>
+                Die Seite wird aus dem Originalbild neu aufgebaut – ohne Qualitätsverlust.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1">
+                <Label htmlFor="refitSize" className="text-xs">
+                  Seitenformat
+                </Label>
+                <select
+                  id="refitSize"
+                  value={refitSize}
+                  onChange={(e) => setRefitSize(e.target.value as ImagePageSize)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {Object.keys(PAGE_FORMATS).map((key) => (
+                    <option key={key} value={key}>
+                      {PAGE_FORMATS[key].label}-Seite (eingepasst)
+                    </option>
+                  ))}
+                  <option value="original">Originalgröße des Bildes</option>
+                </select>
+              </div>
+
+              {refitSize !== 'original' && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Ausrichtung</Label>
+                  <div className="flex flex-wrap gap-1">
+                    <Button
+                      type="button"
+                      variant={refitOrientation === 'auto' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setRefitOrientation('auto')}
+                    >
+                      Automatisch
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={refitOrientation === 'portrait' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setRefitOrientation('portrait')}
+                      className="gap-1.5"
+                    >
+                      <RectangleVertical className="h-4 w-4" />
+                      Hochformat
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={refitOrientation === 'landscape' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setRefitOrientation('landscape')}
+                      className="gap-1.5"
+                    >
+                      <RectangleHorizontal className="h-4 w-4" />
+                      Querformat
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setRefitId(null)} disabled={isRefitting}>
+                  <X className="h-4 w-4 mr-1" />
+                  Abbrechen
+                </Button>
+                <Button onClick={applyRefit} disabled={isRefitting}>
+                  {isRefitting ? 'Wird angewendet …' : 'Übernehmen'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {editingItem && (
         <PageEditor
