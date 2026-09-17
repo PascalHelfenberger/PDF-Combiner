@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import PageEditor from '@/PageEditor'
+import HelpCenter from '@/HelpCenter'
 import {
   FileUp,
   Download,
@@ -47,6 +48,11 @@ import {
   ScanText,
   Image as ImageIcon,
   Scaling,
+  CheckCircle2,
+  AlertCircle,
+  Info,
+  Pencil,
+  HelpCircle,
 } from 'lucide-react'
 
 // PDF.js Worker lokal/inline bündeln -> funktioniert offline und über file://
@@ -352,47 +358,14 @@ function SortableItem({ pageItem, onToggle, onRemove, onAddBlankAfter, onOpenEdi
         isDragging ? 'opacity-50 shadow-2xl scale-[1.03] z-50' : 'hover:shadow-lg hover:-translate-y-0.5'
       } ${!pageItem.selected ? 'opacity-50' : ''}`}
     >
-      {/* Kopfzeile: Nummer + Auswahl / Ziehen + Löschen */}
-      <div className="flex items-center justify-between gap-1 px-2 py-1.5 border-b border-border/40">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-semibold text-muted-foreground tabular-nums w-5 text-center">
-            {pageItem.selected ? displayNumber : '–'}
-          </span>
-          <Checkbox
-            checked={pageItem.selected}
-            onCheckedChange={() => onToggle(pageItem.id)}
-            className="h-4 w-4 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
-          />
-        </div>
-        <div className="flex items-center gap-0.5">
-          <button
-            className="cursor-grab active:cursor-grabbing touch-none p-1 hover:bg-primary/10 rounded-md transition-colors"
-            {...attributes}
-            {...listeners}
-            title="Zum Verschieben ziehen"
-          >
-            <GripVertical className="h-4 w-4 text-muted-foreground" />
-          </button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onRemove(pageItem.id)}
-            title="Entfernen"
-            className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Vorschau (Doppelklick öffnet den Editor) */}
+      {/* Vorschau mit Positionsnummer; Aktionen erscheinen beim Überfahren */}
       <div
-        className="flex-1 flex items-center justify-center p-3 bg-muted/30 min-h-[150px] cursor-pointer"
+        className="relative flex-1 flex items-center justify-center p-3 bg-muted/30 aspect-[3/4] cursor-pointer"
         onDoubleClick={() => onOpenEditor(pageItem.id)}
         title="Doppelklick zum Bearbeiten"
       >
         {isBlank ? (
-          <div className="w-full h-full min-h-[130px] rounded-lg border-2 border-dashed border-muted-foreground/30 bg-background flex flex-col items-center justify-center gap-2 text-muted-foreground">
+          <div className="w-full h-full rounded-lg border-2 border-dashed border-muted-foreground/30 bg-background flex flex-col items-center justify-center gap-2 text-muted-foreground">
             <FileX className="h-8 w-8 opacity-60" />
             <span className="text-xs font-medium text-center px-2">
               {pageItem.blankLabel ?? 'Leerseite'}
@@ -402,16 +375,80 @@ function SortableItem({ pageItem, onToggle, onRemove, onAddBlankAfter, onOpenEdi
           <img
             src={pageItem.thumbnail}
             alt="Seitenvorschau"
-            className="max-h-[180px] w-auto rounded-md shadow-md pdf-thumbnail"
+            className="max-h-full max-w-full w-auto rounded-md shadow-md pdf-thumbnail"
           />
         ) : (
-          <div className="w-full min-h-[130px] rounded-lg bg-muted/50 flex items-center justify-center">
-            <FileText className="h-8 w-8 text-muted-foreground/40" />
+          <div className="w-full h-full rounded-lg bg-muted/50 flex items-center justify-center">
+            <FileText className="h-8 w-8 text-muted-foreground/40 animate-pulse" />
           </div>
         )}
+
+        {/* Nummer und Auswahl liegen über der Vorschau */}
+        <div className="absolute top-1.5 left-1.5 flex items-center gap-1.5 rounded-lg bg-background/85 backdrop-blur-sm px-1.5 py-1 shadow-sm">
+          <span className="text-xs font-semibold tabular-nums w-4 text-center">
+            {pageItem.selected ? displayNumber : '–'}
+          </span>
+          <Checkbox
+            checked={pageItem.selected}
+            onCheckedChange={() => onToggle(pageItem.id)}
+            aria-label="Seite auswählen"
+            className="h-4 w-4 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+          />
+        </div>
+
+        <button
+          className="absolute top-1.5 right-1.5 cursor-grab active:cursor-grabbing touch-none p-1.5 rounded-lg bg-background/85 backdrop-blur-sm shadow-sm hover:bg-background transition-colors"
+          {...attributes}
+          {...listeners}
+          title="Zum Verschieben ziehen"
+        >
+          <GripVertical className="h-4 w-4 text-muted-foreground" />
+        </button>
+
+        {/* Auf Touch-Geräten dauerhaft sichtbar, am Desktop erst beim Überfahren */}
+        <div className="absolute inset-x-0 bottom-0 flex justify-center gap-1 p-1.5 bg-gradient-to-t from-background/95 to-transparent opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200">
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={() => onOpenEditor(pageItem.id)}
+            title="Seite bearbeiten"
+            className="h-8 w-8 shadow-sm"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          {isImage && (
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() => onRefit(pageItem.id)}
+              title="Format und Ausrichtung dieser Bildseite ändern"
+              className="h-8 w-8 shadow-sm"
+            >
+              <Scaling className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={() => onAddBlankAfter(pageItem.id)}
+            title="Leerseite nach dieser Seite einfügen"
+            className="h-8 w-8 shadow-sm"
+          >
+            <FilePlus className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={() => onRemove(pageItem.id)}
+            title="Seite entfernen"
+            className="h-8 w-8 shadow-sm text-destructive hover:text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
-      {/* Fußzeile: Beschriftung + Leerseite einfügen */}
+      {/* Fußzeile: Herkunft der Seite */}
       <div className="px-2 py-1.5 border-t border-border/40">
         <p className={`text-xs font-medium truncate ${!pageItem.selected ? 'line-through text-muted-foreground' : ''}`}>
           {isBlank ? 'Leerseite' : pageItem.sourceName}
@@ -424,29 +461,46 @@ function SortableItem({ pageItem, onToggle, onRemove, onAddBlankAfter, onOpenEdi
               : `Seite ${(pageItem.pageIndex ?? 0) + 1}`}
           {pageItem.editedDataUrl ? ' · bearbeitet' : ''}
         </p>
-        {isImage && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onRefit(pageItem.id)}
-            title="Format und Ausrichtung dieser Bildseite ändern"
-            className="w-full mt-1 h-7 text-xs text-primary hover:bg-primary/10"
-          >
-            <Scaling className="h-3.5 w-3.5 mr-1" />
-            Einpassung ändern
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onAddBlankAfter(pageItem.id)}
-          title="Leerseite nach dieser Seite einfügen"
-          className="w-full mt-1 h-7 text-xs text-primary hover:bg-primary/10"
-        >
-          <FilePlus className="h-3.5 w-3.5 mr-1" />
-          Leerseite danach
-        </Button>
       </div>
+    </div>
+  )
+}
+
+interface Toast {
+  id: string
+  message: string
+  variant: 'success' | 'error' | 'info'
+}
+
+// Kurze Rückmeldungen am oberen Rand – ersetzt die störenden Browser-Dialoge
+function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
+  return (
+    <div className="fixed top-4 right-4 z-[200] flex flex-col gap-2 w-[min(24rem,calc(100vw-2rem))]">
+      {toasts.map((toast) => {
+        const styles = {
+          success: 'border-green-500/40 text-green-700 dark:text-green-300',
+          error: 'border-destructive/40 text-destructive',
+          info: 'border-primary/40 text-primary',
+        }[toast.variant]
+        const Icon = { success: CheckCircle2, error: AlertCircle, info: Info }[toast.variant]
+        return (
+          <div
+            key={toast.id}
+            role="status"
+            className={`glass-card rounded-xl border-l-4 px-4 py-3 flex items-start gap-3 animate-slide-up ${styles}`}
+          >
+            <Icon className="h-5 w-5 shrink-0 mt-0.5" />
+            <p className="text-sm text-foreground flex-1 whitespace-pre-line">{toast.message}</p>
+            <button
+              onClick={() => onDismiss(toast.id)}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Meldung schließen"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -493,6 +547,7 @@ function App() {
   const [refitSize, setRefitSize] = useState<ImagePageSize>('A4')
   const [refitOrientation, setRefitOrientation] = useState<ImageOrientation>('auto')
   const [isRefitting, setIsRefitting] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const [ocrEnabled, setOcrEnabled] = useState(false)
   const [ocrLanguages, setOcrLanguages] = useState<string[]>(['deu', 'eng'])
   const [ocrStatus, setOcrStatus] = useState<string | null>(null)
@@ -502,7 +557,25 @@ function App() {
     pageItemsRef.current = pageItems
   }, [pageItems])
   const [isProcessing, setIsProcessing] = useState(false)
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
+  const [toasts, setToasts] = useState<Toast[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
+  // Zähler, damit das Drop-Overlay beim Überfahren von Kindelementen nicht flackert
+  const dragDepthRef = useRef(0)
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((list) => list.filter((t) => t.id !== id))
+  }, [])
+
+  const showToast = useCallback(
+    (message: string, variant: Toast['variant'] = 'info') => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+      setToasts((list) => [...list, { id, message, variant }])
+      // Fehler bleiben länger stehen, damit man sie in Ruhe lesen kann
+      window.setTimeout(() => dismissToast(id), variant === 'error' ? 9000 : 4000)
+    },
+    [dismissToast]
+  )
   const [previewData, setPreviewData] = useState<PreviewData | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [darkMode, setDarkMode] = useState(() => {
@@ -648,14 +721,22 @@ function App() {
       })
     }
 
-    if (failed.length > 0) {
-      alert(
-        `Diese Dateien konnten nicht geladen werden:\n\n${failed.join('\n')}\n\n` +
-          'Mögliche Ursachen: beschädigte oder passwortgeschützte PDFs, oder ein ' +
-          'Bildformat, das der Browser nicht öffnen kann (z. B. HEIC von iPhones).'
+    if (newItems.length > 0) {
+      showToast(
+        `${newItems.length} ${newItems.length === 1 ? 'Seite' : 'Seiten'} hinzugefügt`,
+        'success'
       )
     }
-  }, [imagePageSize, imageOrientation])
+
+    if (failed.length > 0) {
+      showToast(
+        `Nicht geladen: ${failed.join(', ')}\n` +
+          'Mögliche Ursachen: beschädigte oder passwortgeschützte PDFs, oder ein ' +
+          'Bildformat, das der Browser nicht öffnen kann (z. B. HEIC von iPhones).',
+        'error'
+      )
+    }
+  }, [imagePageSize, imageOrientation, showToast])
 
   const makeBlankItem = (): PageItem => {
     const fmt = PAGE_FORMATS[blankFormat]
@@ -691,9 +772,11 @@ function App() {
     })
   }
 
+  // Dateien können überall im Fenster abgelegt werden, nicht nur im Upload-Feld
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
+      dragDepthRef.current = 0
       setIsDragOver(false)
       if (e.dataTransfer.files) {
         handleFiles(e.dataTransfer.files)
@@ -704,12 +787,20 @@ function App() {
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
+  }, [])
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    // Nur echte Dateien zeigen das Overlay, nicht das Ziehen von Seitenkacheln
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+    dragDepthRef.current += 1
     setIsDragOver(true)
   }, [])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    setIsDragOver(false)
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsDragOver(false)
   }, [])
 
   const handleFileInput = useCallback(
@@ -796,9 +887,10 @@ function App() {
       )
       await renderThumbnailsForSource(item.sourceId)
       setRefitId(null)
+      showToast('Einpassung angepasst', 'success')
     } catch (error) {
       console.error('Einpassung konnte nicht geändert werden:', error)
-      alert('Die Einpassung konnte nicht geändert werden.')
+      showToast('Die Einpassung konnte nicht geändert werden.', 'error')
     } finally {
       setIsRefitting(false)
     }
@@ -922,11 +1014,12 @@ function App() {
   const combinePDFs = async () => {
     const selectedItems = pageItems.filter((f) => f.selected)
     if (selectedItems.length < 1) {
-      alert('Bitte wählen Sie mindestens 1 Seite aus.')
+      showToast('Bitte wählen Sie mindestens 1 Seite aus.', 'error')
       return
     }
 
     setIsProcessing(true)
+    setProgress({ current: 0, total: selectedItems.length })
 
     try {
       const mergedPdf = await PDFDocument.create()
@@ -960,6 +1053,7 @@ function App() {
       let pageNo = 0
       for (const item of selectedItems) {
         pageNo++
+        setProgress({ current: pageNo, total: selectedItems.length })
         if (item.editedDataUrl && item.editedWidthPt && item.editedHeightPt) {
           const wPt = item.editedWidthPt
           const hPt = item.editedHeightPt
@@ -1057,15 +1151,21 @@ function App() {
         pages: renderedPages,
       })
       setShowPreview(true)
+      showToast(
+        `PDF mit ${mergedPdf.getPageCount()} Seiten erstellt${doOcr ? ' – inkl. OCR-Textlayer' : ''}`,
+        'success'
+      )
     } catch (error) {
       console.error('Fehler beim Zusammenfügen:', error)
-      alert(
+      showToast(
         error instanceof Error && error.message
           ? error.message
-          : 'Fehler beim Zusammenfügen der PDFs. Bitte versuchen Sie es erneut.'
+          : 'Fehler beim Zusammenfügen der PDFs. Bitte versuchen Sie es erneut.',
+        'error'
       )
     } finally {
       setIsProcessing(false)
+      setProgress(null)
       setOcrStatus(null)
     }
   }
@@ -1206,7 +1306,26 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background bg-pattern flex flex-col">
+    <div
+      className="min-h-screen bg-background bg-pattern flex flex-col"
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+    >
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Overlay, solange Dateien über dem Fenster schweben */}
+      {isDragOver && (
+        <div className="fixed inset-0 z-[150] bg-primary/10 backdrop-blur-sm flex items-center justify-center p-8 pointer-events-none animate-fade-in">
+          <div className="glass-card rounded-3xl border-2 border-dashed border-primary px-10 py-12 text-center shadow-2xl">
+            <FileUp className="h-16 w-16 mx-auto mb-4 text-primary animate-bounce-in" />
+            <p className="text-xl font-semibold">Dateien hier ablegen</p>
+            <p className="text-sm text-muted-foreground mt-1">PDFs und Bilder werden übernommen</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="glass-header text-white py-6 sm:py-8 shadow-lg shrink-0">
         <div className="container px-4">
@@ -1222,7 +1341,17 @@ function App() {
                 </p>
               </div>
             </div>
-            <ThemeToggle darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowHelp(true)}
+                title="Hilfe: alle Funktionen im Überblick"
+                aria-label="Hilfe öffnen"
+                className="p-2.5 rounded-xl glass transition-all duration-300 hover:scale-110 hover:shadow-lg"
+              >
+                <HelpCircle className="h-6 w-6 text-white" />
+              </button>
+              <ThemeToggle darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} />
+            </div>
           </div>
         </div>
       </header>
@@ -1245,9 +1374,6 @@ function App() {
             </CardHeader>
             <CardContent>
               <div
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
                 onClick={() => fileInputRef.current?.click()}
                 className={`border-2 border-dashed rounded-xl p-8 sm:p-12 text-center cursor-pointer transition-all duration-300 ${
                   isDragOver
@@ -1559,37 +1685,8 @@ function App() {
                   )}
                 </div>
 
-                <Button
-                  onClick={combinePDFs}
-                  disabled={selectedCount < 1 || isProcessing || (ocrEnabled && ocrLanguages.length === 0)}
-                  className="w-full hover:scale-[1.02] transition-all duration-200 shadow-lg hover:shadow-primary/25"
-                  size="lg"
-                >
-                  {isProcessing ? (
-                    <>
-                      <Combine className="h-5 w-5 mr-2 animate-spin" />
-                      Verarbeite...
-                    </>
-                  ) : (
-                    <>
-                      <Combine className="h-5 w-5 mr-2" />
-                      {totalPages} {totalPages === 1 ? 'Seite' : 'Seiten'} zusammenfügen
-                    </>
-                  )}
-                </Button>
-
-                {ocrStatus && (
-                  <p className="text-xs text-center text-primary animate-pulse">{ocrStatus}</p>
-                )}
-
-                {selectedCount < 1 && (
-                  <p className="text-sm text-muted-foreground text-center">
-                    Wählen Sie mindestens 1 Seite aus
-                  </p>
-                )}
-
                 <p className="text-xs text-muted-foreground text-center">
-                  Nach dem Zusammenfügen wird eine Vorschau angezeigt
+                  Der Knopf zum Zusammenfügen ist immer am unteren Rand erreichbar.
                 </p>
               </CardContent>
             </Card>
@@ -1614,6 +1711,57 @@ function App() {
         </div>
       </main>
 
+      {/* Feste Aktionsleiste: Hauptaktion bleibt immer erreichbar */}
+      {pageItems.length > 0 && (
+        <div className="sticky bottom-0 z-40 glass border-t border-border/50 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+          {isProcessing && progress && (
+            <div className="h-1 bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${Math.round((progress.current / progress.total) * 100)}%` }}
+              />
+            </div>
+          )}
+          <div className="container px-4 py-3 flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium truncate">
+                {selectedCount} von {pageItems.length}{' '}
+                {pageItems.length === 1 ? 'Seite' : 'Seiten'} ausgewählt
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                {isProcessing
+                  ? ocrStatus ??
+                    (progress ? `Seite ${progress.current} von ${progress.total} …` : 'Verarbeite …')
+                  : `${outputName || 'combined'}.pdf`}
+              </p>
+            </div>
+            <Button
+              onClick={combinePDFs}
+              disabled={
+                selectedCount < 1 || isProcessing || (ocrEnabled && ocrLanguages.length === 0)
+              }
+              size="lg"
+              className="shrink-0 hover:scale-[1.02] transition-all duration-200 shadow-lg hover:shadow-primary/25"
+            >
+              {isProcessing ? (
+                <>
+                  <Combine className="h-5 w-5 sm:mr-2 animate-spin" />
+                  <span className="hidden sm:inline">Verarbeite …</span>
+                </>
+              ) : (
+                <>
+                  <Combine className="h-5 w-5 sm:mr-2" />
+                  <span className="hidden sm:inline">
+                    {totalPages} {totalPages === 1 ? 'Seite' : 'Seiten'} zusammenfügen
+                  </span>
+                  <span className="sm:hidden">Zusammenfügen</span>
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+
       <footer className="glass py-4 shrink-0 mt-auto">
         <div className="container px-4">
           <div className="flex items-center justify-center gap-3">
@@ -1629,6 +1777,8 @@ function App() {
           </div>
         </div>
       </footer>
+
+      {showHelp && <HelpCenter onClose={() => setShowHelp(false)} />}
 
       {/* Dialog: Einpassung einer Bildseite nachträglich ändern */}
       {refitId && (
