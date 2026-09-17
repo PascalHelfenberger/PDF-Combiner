@@ -53,6 +53,8 @@ import {
   Info,
   Pencil,
   HelpCircle,
+  Undo2,
+  Loader2,
 } from 'lucide-react'
 
 // PDF.js Worker lokal/inline bündeln -> funktioniert offline und über file://
@@ -470,6 +472,8 @@ interface Toast {
   id: string
   message: string
   variant: 'success' | 'error' | 'info'
+  /** Optionaler Knopf in der Meldung, z. B. zum Rückgängigmachen */
+  action?: { label: string; onClick: () => void }
 }
 
 // Kurze Rückmeldungen am oberen Rand – ersetzt die störenden Browser-Dialoge
@@ -490,7 +494,23 @@ function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: st
             className={`glass-card rounded-xl border-l-4 px-4 py-3 flex items-start gap-3 animate-slide-up ${styles}`}
           >
             <Icon className="h-5 w-5 shrink-0 mt-0.5" />
-            <p className="text-sm text-foreground flex-1 whitespace-pre-line">{toast.message}</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-foreground whitespace-pre-line">{toast.message}</p>
+              {toast.action && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    toast.action?.onClick()
+                    onDismiss(toast.id)
+                  }}
+                  className="mt-2 h-7 text-xs gap-1"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  {toast.action.label}
+                </Button>
+              )}
+            </div>
             <button
               onClick={() => onDismiss(toast.id)}
               className="text-muted-foreground hover:text-foreground transition-colors"
@@ -562,20 +582,55 @@ function App() {
   const [isDragOver, setIsDragOver] = useState(false)
   // Zähler, damit das Drop-Overlay beim Überfahren von Kindelementen nicht flackert
   const dragDepthRef = useRef(0)
+  // Status beim Einlesen von Dateien (große PDFs brauchen spürbar Zeit)
+  const [importStatus, setImportStatus] = useState<string | null>(null)
+  // Sicherungskopie für „Rückgängig" nach dem Löschen von Seiten
+  const undoSnapshotRef = useRef<{
+    items: PageItem[]
+    sources: Map<string, Uint8Array>
+    imageSources: Map<string, { file: File; pageSize: ImagePageSize; orientation: ImageOrientation }>
+  } | null>(null)
+  const undoToastIdRef = useRef<string | null>(null)
 
   const dismissToast = useCallback((id: string) => {
     setToasts((list) => list.filter((t) => t.id !== id))
+    // Sicherungskopie freigeben, sobald die zugehörige Meldung verschwindet
+    if (undoToastIdRef.current === id) {
+      undoSnapshotRef.current = null
+      undoToastIdRef.current = null
+    }
   }, [])
 
   const showToast = useCallback(
-    (message: string, variant: Toast['variant'] = 'info') => {
+    (message: string, variant: Toast['variant'] = 'info', action?: Toast['action']) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-      setToasts((list) => [...list, { id, message, variant }])
-      // Fehler bleiben länger stehen, damit man sie in Ruhe lesen kann
-      window.setTimeout(() => dismissToast(id), variant === 'error' ? 9000 : 4000)
+      setToasts((list) => [...list, { id, message, variant, action }])
+      // Fehler und Meldungen mit Aktion bleiben länger stehen
+      const duration = variant === 'error' ? 9000 : action ? 8000 : 4000
+      window.setTimeout(() => dismissToast(id), duration)
+      return id
     },
     [dismissToast]
   )
+
+  // Eine einzelne Sicherungskopie für „Rückgängig" nach dem Löschen
+  const snapshotForUndo = () => {
+    undoSnapshotRef.current = {
+      items: pageItemsRef.current,
+      sources: new Map(sourcesRef.current),
+      imageSources: new Map(imageSourcesRef.current),
+    }
+  }
+
+  const restoreUndoSnapshot = () => {
+    const snapshot = undoSnapshotRef.current
+    if (!snapshot) return
+    sourcesRef.current = snapshot.sources
+    imageSourcesRef.current = snapshot.imageSources
+    setPageItems(snapshot.items)
+    undoSnapshotRef.current = null
+    undoToastIdRef.current = null
+  }
   const [previewData, setPreviewData] = useState<PreviewData | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [darkMode, setDarkMode] = useState(() => {
@@ -596,6 +651,18 @@ function App() {
     }
     localStorage.setItem('darkMode', String(darkMode))
   }, [darkMode])
+
+  // Warnung, wenn das Fenster mit ungesicherter Zusammenstellung geschlossen wird.
+  // Die Seiten liegen nur im Arbeitsspeicher und wären sonst verloren.
+  useEffect(() => {
+    if (pageItems.length === 0) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [pageItems.length])
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -681,37 +748,51 @@ function App() {
       (file) => file.type === 'application/pdf' || file.type.startsWith('image/')
     )
 
+    if (fileArray.length === 0) return
+
     const newItems: PageItem[] = []
     const newSourceIds: string[] = []
     const failed: string[] = []
-    for (const file of fileArray) {
-      const isImage = file.type.startsWith('image/')
-      let bytes: Uint8Array
-      try {
-        bytes = isImage
-          ? await imageFileToPdfBytes(file, imagePageSize, imageOrientation)
-          : new Uint8Array(await file.arrayBuffer())
-      } catch (error) {
-        console.error(`Datei konnte nicht gelesen werden: ${file.name}`, error)
-        failed.push(file.name)
-        continue
-      }
-      const items = await explodeBytes(bytes, file.name)
-      if (items.length === 0) {
-        failed.push(file.name)
-        continue
-      }
-      if (items[0].sourceId) {
-        newSourceIds.push(items[0].sourceId)
-        if (isImage) {
-          imageSourcesRef.current.set(items[0].sourceId, {
-            file,
-            pageSize: imagePageSize,
-            orientation: imageOrientation,
-          })
+    try {
+      for (const [index, file] of fileArray.entries()) {
+        setImportStatus(
+          fileArray.length > 1
+            ? `${file.name} wird gelesen … (${index + 1} von ${fileArray.length})`
+            : `${file.name} wird gelesen …`
+        )
+        // Kurz an den Browser abgeben, damit die Anzeige vor der Arbeit erscheint
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        const isImage = file.type.startsWith('image/')
+        let bytes: Uint8Array
+        try {
+          bytes = isImage
+            ? await imageFileToPdfBytes(file, imagePageSize, imageOrientation)
+            : new Uint8Array(await file.arrayBuffer())
+        } catch (error) {
+          console.error(`Datei konnte nicht gelesen werden: ${file.name}`, error)
+          failed.push(file.name)
+          continue
         }
+        const items = await explodeBytes(bytes, file.name)
+        if (items.length === 0) {
+          failed.push(file.name)
+          continue
+        }
+        if (items[0].sourceId) {
+          newSourceIds.push(items[0].sourceId)
+          if (isImage) {
+            imageSourcesRef.current.set(items[0].sourceId, {
+              file,
+              pageSize: imagePageSize,
+              orientation: imageOrientation,
+            })
+          }
+        }
+        newItems.push(...items)
       }
-      newItems.push(...items)
+    } finally {
+      setImportStatus(null)
     }
 
     if (newItems.length > 0) {
@@ -719,9 +800,6 @@ function App() {
       newSourceIds.forEach((sid) => {
         void renderThumbnailsForSource(sid)
       })
-    }
-
-    if (newItems.length > 0) {
       showToast(
         `${newItems.length} ${newItems.length === 1 ? 'Seite' : 'Seiten'} hinzugefügt`,
         'success'
@@ -832,16 +910,24 @@ function App() {
   }
 
   const removeFile = (id: string) => {
-    setPageItems((items) => {
-      const removed = items.find((f) => f.id === id)
-      const rest = items.filter((f) => f.id !== id)
-      // Quelldaten freigeben, sobald keine Seite mehr darauf verweist
-      const sourceId = removed?.sourceId
-      if (sourceId && !rest.some((f) => f.sourceId === sourceId)) {
-        sourcesRef.current.delete(sourceId)
-        imageSourcesRef.current.delete(sourceId)
-      }
-      return rest
+    const removed = pageItems.find((f) => f.id === id)
+    if (!removed) return
+    snapshotForUndo()
+
+    const rest = pageItems.filter((f) => f.id !== id)
+    // Quelldaten freigeben, sobald keine Seite mehr darauf verweist
+    const sourceId = removed.sourceId
+    if (sourceId && !rest.some((f) => f.sourceId === sourceId)) {
+      sourcesRef.current = new Map(sourcesRef.current)
+      imageSourcesRef.current = new Map(imageSourcesRef.current)
+      sourcesRef.current.delete(sourceId)
+      imageSourcesRef.current.delete(sourceId)
+    }
+    setPageItems(rest)
+
+    undoToastIdRef.current = showToast('Seite entfernt', 'info', {
+      label: 'Rückgängig',
+      onClick: restoreUndoSnapshot,
     })
   }
 
@@ -914,9 +1000,20 @@ function App() {
   }
 
   const removeAll = () => {
+    if (pageItems.length === 0) return
+    const count = pageItems.length
+    snapshotForUndo()
+
     setPageItems([])
-    sourcesRef.current.clear()
-    imageSourcesRef.current.clear()
+    // Neue Maps statt clear(), damit die Sicherungskopie unberührt bleibt
+    sourcesRef.current = new Map()
+    imageSourcesRef.current = new Map()
+
+    undoToastIdRef.current = showToast(
+      `${count} ${count === 1 ? 'Seite' : 'Seiten'} entfernt`,
+      'info',
+      { label: 'Rückgängig', onClick: restoreUndoSnapshot }
+    )
   }
 
   const toggleOcrLanguage = (code: string) => {
@@ -1374,13 +1471,25 @@ function App() {
             </CardHeader>
             <CardContent>
               <div
-                onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-8 sm:p-12 text-center cursor-pointer transition-all duration-300 ${
-                  isDragOver
-                    ? 'border-primary bg-primary/10 scale-[1.02] shadow-lg shadow-primary/20'
-                    : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-accent/50'
+                onClick={() => !importStatus && fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-8 sm:p-12 text-center transition-all duration-300 ${
+                  importStatus
+                    ? 'border-primary/60 bg-primary/5 cursor-wait'
+                    : isDragOver
+                      ? 'border-primary bg-primary/10 scale-[1.02] shadow-lg shadow-primary/20 cursor-pointer'
+                      : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-accent/50 cursor-pointer'
                 }`}
               >
+                {importStatus ? (
+                  <div>
+                    <Loader2 className="h-12 w-12 mx-auto mb-4 text-primary animate-spin" />
+                    <p className="text-lg font-medium">Dateien werden eingelesen …</p>
+                    <p className="text-sm text-muted-foreground mt-2 truncate">{importStatus}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Bei großen PDFs kann das einen Moment dauern.
+                    </p>
+                  </div>
+                ) : (
                 <div className={`transition-transform duration-300 ${isDragOver ? 'scale-110' : ''}`}>
                   <FileUp
                     className={`h-12 w-12 mx-auto mb-4 transition-colors duration-300 ${
@@ -1396,6 +1505,7 @@ function App() {
                     oder klicken zum Auswählen · JPG, PNG, WebP werden zu PDF-Seiten
                   </p>
                 </div>
+                )}
                 <input
                   ref={fileInputRef}
                   type="file"

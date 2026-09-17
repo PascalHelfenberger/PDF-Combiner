@@ -116,16 +116,16 @@ const HELP_ENTRIES: HelpEntry[] = [
     category: 'Seiten verwalten',
     title: 'Alle / Keine / Alles entfernen',
     where: 'Kopfzeile der Karte „Seitenreihenfolge"',
-    text: '„Alle" wählt sämtliche Seiten aus, „Keine" hebt die Auswahl auf. Der rote Papierkorb daneben entfernt alle Seiten und leert die Liste vollständig.',
-    keywords: 'alle keine leeren zurücksetzen papierkorb löschen',
+    text: '„Alle" wählt sämtliche Seiten aus, „Keine" hebt die Auswahl auf. Der rote Papierkorb daneben entfernt alle Seiten. Das lässt sich über den Knopf „Rückgängig" in der erscheinenden Meldung zurücknehmen, solange die Meldung sichtbar ist.',
+    keywords: 'alle keine leeren zurücksetzen papierkorb löschen versehentlich',
   },
   {
     id: 'remove-page',
     category: 'Seiten verwalten',
     title: 'Einzelne Seite entfernen',
     where: 'Papierkorb-Symbol auf der Kachel (beim Überfahren)',
-    text: 'Entfernt genau diese Seite aus der Liste. Wird keine Seite der Quelldatei mehr verwendet, gibt das Programm die Daten der Datei frei.',
-    keywords: 'löschen entfernen wegwerfen',
+    text: 'Entfernt genau diese Seite aus der Liste. In der Meldung oben rechts steht danach „Rückgängig", womit sich die Seite an ihrer alten Position wiederherstellen lässt.',
+    keywords: 'löschen entfernen wegwerfen rückgängig undo wiederherstellen',
   },
 
   // ---------- Leerseiten ----------
@@ -264,6 +264,22 @@ const HELP_ENTRIES: HelpEntry[] = [
     where: 'Hinweis in der Fußzeile',
     text: 'Alle Dateien bleiben auf dem eigenen Gerät – nichts wird hochgeladen oder an einen Server gesendet. Einzige Ausnahme sind die OCR-Sprachdaten, die beim ersten Einsatz der Texterkennung geladen werden.',
     keywords: 'datenschutz lokal server cloud sicherheit privat',
+  },
+  {
+    id: 'data-loss',
+    category: 'Allgemeines',
+    title: 'Schutz vor Datenverlust',
+    where: 'Greift automatisch',
+    text: 'Die Zusammenstellung liegt nur im Arbeitsspeicher und geht beim Neuladen verloren. Deshalb warnt der Browser beim Schließen des Fensters, sobald Seiten geladen sind. Gelöschte Seiten lassen sich über „Rückgängig" in der Meldung zurückholen. Wer länger an einer Zusammenstellung arbeitet, sollte zwischendurch ein PDF erzeugen und herunterladen.',
+    keywords: 'verlust reload neu laden schließen warnung speichern sicherheit rückgängig',
+  },
+  {
+    id: 'import-status',
+    category: 'Allgemeines',
+    title: 'Anzeige beim Einlesen',
+    where: 'Im Upload-Feld, während Dateien verarbeitet werden',
+    text: 'Beim Hinzufügen zeigt das Upload-Feld einen Ladekreis und den Namen der Datei, die gerade gelesen wird, bei mehreren Dateien zusätzlich den Zähler. Umfangreiche PDFs brauchen dafür einen Moment – solange die Anzeige läuft, ist die App nicht hängengeblieben.',
+    keywords: 'laden dauert lange warten hängt eingefroren fortschritt',
   },
   {
     id: 'toasts',
